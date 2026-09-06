@@ -1,0 +1,61 @@
+# Architectural conventions for this project.
+# Auto-scaffolded by RoboCo — edit freely; this file is canonical.
+# Each module lists definition KINDS forbidden in it; rules toggle
+# warn/block; waivers are accountable, PR-reviewed escape hatches.
+version: 1
+languages:
+- typescript
+- python
+modules:
+- path: clients/terminal/src/app/api
+  purpose: HTTP routes / endpoint definitions
+  forbidden:
+  - model
+  - helper
+- path: core/agent/services
+  purpose: business logic & orchestration
+  forbidden:
+  - route
+- path: core/agent/workspace-seeds/default/kg/entities
+  purpose: data models / schemas
+  forbidden:
+  - route
+- path: core/agent/workspace-seeds/finos/kg/entities
+  purpose: data models / schemas
+  forbidden:
+  - route
+- path: core/gateway/services
+  purpose: business logic & orchestration
+  forbidden:
+  - route
+- path: core/identity/services
+  purpose: business logic & orchestration
+  forbidden:
+  - route
+- path: core/meetings/services
+  purpose: business logic & orchestration
+  forbidden:
+  - route
+rules:
+  no_lint_suppressions:
+    level: block
+  no_inline_comments:
+    level: warn
+  no_models_in_api:
+    level: block
+  no_helpers_in_api:
+    level: warn
+  no_routes_in_services:
+    level: block
+  no_routes_in_entities:
+    level: block
+  modular_cohesion:
+    level: block
+  god_class:
+    level: warn
+  thin_components:
+    level: block
+  thin_routes:
+    level: block
+custom: []
+waivers: []
