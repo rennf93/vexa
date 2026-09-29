@@ -237,6 +237,10 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         "VEXA_MOUNTS": json.dumps(mounts),                       # the ordered active mount set [{slug,path,role,write,primary}]
         "VEXA_WORKSPACE_STORE_URL": settings.workspace_store_url,
         "REDIS_URL": settings.redis_url,
+        # The unit's scoped toolbelt (unit.v1.tools names) — resolved worker-side against the
+        # tools-seed registry into --allowedTools + an .mcp.json (shared.tools.apply_tool_grant).
+        # Empty list = no toolbelt env at all (byte-identical behavior to before ADR-0036).
+        "VEXA_UNIT_TOOLS": ",".join(invocation.get("tools") or []),
     }
     # Attribution (D4 / WP-A1.2): the per-mount turn commit is authored by the dispatch PRINCIPAL (the
     # authenticated human whose input drives the turn), committer stays the platform. Until membership/

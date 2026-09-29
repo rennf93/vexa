@@ -414,6 +414,39 @@ def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start
                 run_message(msg.get("prompt", ""), f"t{n}", nonce=msg.get("nonce"))
 
 
+def _write_laya_annotation(work: Path, annotation: str) -> None:
+    """SEAM B surface: the pre-pass block becomes a workspace file under .laya/
+    (never staged by governance — same convention as .claude/)."""
+    try:
+        target = work / ".laya"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "meeting-scan.md").write_text(annotation)
+        log.info("agent-api worker: laya annotation materialized at %s",
+                 target / "meeting-scan.md")
+    except OSError as e:  # noqa: BLE001 — advisory; never block the unit (P18 logged)
+        log.warning("agent-api worker: could not write laya annotation: %s", e)
+
+
+def _resolve_toolbelt(work: Path) -> list[str]:
+    """SEAM A resolution: VEXA_UNIT_TOOLS names -> --allowedTools + an injected
+    .mcp.json via the tools-seed registry. Fail-closed on unknown names; the
+    base tools (Read/Write/Edit) always ride. No names/no registry = the
+    historical default list (byte-identical behavior)."""
+    raw = os.environ.get("VEXA_UNIT_TOOLS", "").strip()
+    if not raw:
+        return _chat_default_tools()
+    from shared.tools import ToolRegistry, apply_tool_grant  # lazy: import cost only when used
+    seed_dir = os.environ.get("VEXA_TOOLS_SEED_DIR", "/app/tools-seed")
+    registry = ToolRegistry.from_dir(seed_dir)
+    allowed, _mcp = apply_tool_grant(work, [n for n in raw.split(",") if n], registry)
+    return allowed
+
+
+def _chat_default_tools() -> list[str]:
+    return (os.environ.get("VEXA_CHAT_TOOLS")
+            or "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch").split(",")
+
+
 def main() -> None:  # pragma: no cover — the container entrypoint (wired in tests via serve())
     import redis
 
@@ -435,6 +468,13 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
     _warn = preflight_provider_guard()
     if _warn:
         log.warning("agent-api worker: %s", _warn)
+    # SEAM B (ADR-0036): the control plane's laya pre-pass may have stamped decision candidates.
+    # Materialize them INSIDE the workspace so the fold agent can Read them like any other file —
+    # laya proposes, the agent verifies against the transcript (advisory, never gating).
+    laya_annotation = os.environ.get("VEXA_LAYA_ANNOTATION")
+    if laya_annotation:
+        _write_laya_annotation(work, laya_annotation)
+
     client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
     out_topic = os.environ["VEXA_UNIT_OUT_TOPIC"]
     idle_ms = int(os.environ.get("VEXA_IDLE_TIMEOUT_SEC", "120")) * 1000
@@ -514,10 +554,9 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
             },
         )
     else:  # chat / routine / event — run the entrypoint, then serve interactive messages
-        # Research-capable toolset: WEB search/fetch + the workspace tools. Writes are committed by
-        # run_harness_turn. Override with VEXA_CHAT_TOOLS (comma-separated).
-        chat_tools = (os.environ.get("VEXA_CHAT_TOOLS")
-                      or "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch").split(",")
+        # Research-capable toolset: WEB search/fetch + the workspace tools (defaults), or the
+        # unit's tools-seed grant when the dispatch named tools (ADR-0036 SEAM A).
+        chat_tools = _resolve_toolbelt(work)
         session = os.environ.get("VEXA_CHAT_SESSION") or DEFAULT_CHAT_SESSION
         serve(
             client, out_topic=out_topic, in_topic=os.environ["VEXA_UNIT_IN_TOPIC"],

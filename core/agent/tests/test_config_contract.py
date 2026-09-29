@@ -34,7 +34,7 @@ def _fresh_probe_cache():
 def test_declaration_loads_and_is_internally_consistent():
     decl = cp.load_declaration()
     assert decl["service"] == "agent-api"
-    assert set(decl["capabilities"]) == {"bot_gateway", "model_inference"}
+    assert set(decl["capabilities"]) == {"bot_gateway", "model_inference", "laya"}
     assert decl["capabilities"]["model_inference"]["mode"] == "any"
 
 

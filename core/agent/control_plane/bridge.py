@@ -20,6 +20,8 @@ from shared.config import Settings
 from shared.ports import RuntimePort
 from shared.spawn import build_worker_env
 
+from control_plane.laya_prepass import LayaPrepass
+
 logger = logging.getLogger("agent_api.bridge")
 
 
@@ -74,6 +76,9 @@ class TranscriptBridge:
         self._resolver = resolver
         self.dropped: list[dict] = []   # payloads rejected at the seam (observability)
         self.invoked: list[dict] = []   # invoke.v1 Invocations that fired a spawn
+        # SEAM B (ADR-0036): remember segments as they cross the egress, scan on session_end.
+        # None (VEXA_LAYA_URL unset) = the pre-pass does not exist; the bridge is byte-identical.
+        self.prepass = LayaPrepass(settings.laya_url) if settings.laya_url else None
 
     def handle(self, payload: dict) -> str | None:
         """Process one transcript.v1 payload. Returns the spawned workloadId, or None (no trigger /
@@ -92,6 +97,18 @@ class TranscriptBridge:
             self.dropped.append(payload)
             return None
 
+        laya_annotation: str | None = None
+        if self.prepass is not None:
+            if payload.get("type") == "transcription":
+                # Side-eye the segments already crossing the egress (no new read path).
+                self.prepass.remember(str(payload.get("session_uid")), payload.get("segments") or [])
+            elif payload.get("type") == "session_end":
+                annotation = self.prepass.annotate_on_end(str(payload.get("session_uid")))
+                if annotation:
+                    # Held in a LOCAL, never stamped on the payload: transcript.v1 envelopes are
+                    # additionalProperties:false, and the seam re-validates below.
+                    laya_annotation = annotation["block"]
+
         # 2) Is this a trigger?
         try:
             invocation = _invocation_for(payload, self._resolver, self._settings.workspace_ref)
@@ -104,6 +121,8 @@ class TranscriptBridge:
 
         # 3) Spawn the agent worker via runtime.v1, env per spec-agent.json.
         env = build_worker_env(self._settings, invocation["workspace_repo"])
+        if laya_annotation:
+            env["VEXA_LAYA_ANNOTATION"] = laya_annotation
         workload_id = f"agent-{invocation['meeting']['session_uid']}"
         acked = self._runtime.spawn(workload_id, self._settings.agent_profile, env)
         self.invoked.append(invocation)
