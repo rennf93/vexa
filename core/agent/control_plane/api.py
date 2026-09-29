@@ -34,6 +34,7 @@ from jsonschema.exceptions import ValidationError
 from pydantic import BaseModel
 
 from control_plane import meeting_steering
+from control_plane.laya_prepass import LayaPrepass
 from control_plane import schedule_digest as schedule_digest_mod
 from control_plane import routines as routines_mod
 from control_plane.config_preflight import NOT_CONFIGURED, capability_state, missing_capability_keys
@@ -1032,9 +1033,17 @@ def create_app(
         transcript_start_id = _stream_tail_id(redis_url, f"tc:meeting:{body.native_id}")
         if transcript_start_id:
             meeting_ctx["transcript_start_id"] = transcript_start_id
+        brief = _MEETING_BRIEF
+        prepass = getattr(app.state, "laya_prepass", None)
+        if prepass is not None:
+            # The stream may predate this process (the watcher remembers only new segments),
+            # so scan the stream itself; the watcher's memory continues independently.
+            annotation = prepass.annotate_stream(redis_url, f"tc:meeting:{body.native_id}")
+            if annotation:
+                brief = _MEETING_BRIEF + "\n\n" + annotation["block"]
         inv = units.make_dispatch(
             subject=subject_of(request), trigger="transcription",
-            start=units.entrypoint(inline=_MEETING_BRIEF),
+            start=units.entrypoint(inline=brief),
             context={"kind": "meeting", "meeting": meeting_ctx},
         )
         unit_id = dispatcher.dispatch(inv)
@@ -2366,7 +2375,13 @@ def _build_production_app() -> FastAPI:
     # NOTE: no `subject=` → the watcher uses its PRE-M2 `u_live` placeholder; live-meeting dispatch (M2)
     # must pass the real meeting owner here (see transcription_watcher.start).
     from control_plane import transcription_watcher
-    transcription_watcher.start(settings.redis_url, dispatcher, app.state.live_meetings)
+    laya_prepass = LayaPrepass(settings.laya_url) if settings.laya_url else None
+    if laya_prepass is not None:
+        logger.info("laya prepass enabled (%s)", settings.laya_url)  # ADR-0036 SEAM B
+    transcription_watcher.start(settings.redis_url, dispatcher, app.state.live_meetings,
+                                prepass=laya_prepass)
+    # Stash for /api/meeting/start's one-shot peek scan of an existing transcript stream.
+    app.state.laya_prepass = laya_prepass
     return app
 
 

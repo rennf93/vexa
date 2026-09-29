@@ -1,0 +1,1 @@
+# laya_svc — the service package. main.py is the composition root (P6); scanner.py owns windowing over a judge port; judge.py adapts the laya checkpoint (the only torch-land import); mcp_tools.py is the SEAM A MCP surface.

@@ -1,29 +1,27 @@
 [project]
-name = "laya-svc"
-version = "0.1.0"
-description = "Vexa System-1 decision service — laya checkpoint behind laya.v1 + MCP"
+name = "vexa-laya"
+version = "0.12.0"
+description = "The laya service (P-agent) — a System-1 decision layer: one laya checkpoint behind the laya.v1 scan wire (/v1/scan/decision) and the laya_decide MCP tool (/mcp). Self-contained: imports only third-party + its own module (no cross-brick edges). The heavy runtime (the laya package + torch) arrives via the 'runtime' extra and is NOT needed for the unit pyramid — the judge port is faked."
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
-    "fastapi>=0.110",
+    "fastapi>=0.110,<1",
     "uvicorn>=0.29",
     "pydantic>=2.7",
     "pydantic-settings>=2.2",
+    "httpx>=0.27,<1",
+    "pytest>=8",
 ]
 
 [project.optional-dependencies]
-# The torch-land runtime + the MCP attachment. Unit tests run WITHOUT these
-# (the judge port is faked) so gate:python never downloads a checkpoint.
+# torch-land + the MCP attachment. Unit tests run WITHOUT these (the judge port
+# is faked) so gate:python never downloads a checkpoint.
 runtime = ["laya==0.3.20"]
 mcp = ["fastmcp>=2.0"]
-dev = ["pytest>=8", "httpx>=0.27"]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/laya_svc"]
+[tool.uv]
+package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "tests"]

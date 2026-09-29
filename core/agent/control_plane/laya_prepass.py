@@ -74,6 +74,32 @@ class LayaPrepass:
         if len(buf) > MAX_SEGMENTS:
             del buf[: len(buf) - MAX_SEGMENTS]
 
+    def annotate_peek(self, session_uid: str) -> dict[str, Any] | None:
+        """Scan WITHOUT consuming memory (the live copilot arms repeatedly; the
+        fold-time scan in the bridge still needs the full history)."""
+        segs = self._sessions.get(session_uid)
+        if not segs:
+            return None
+        try:
+            result = self._scan_fn(
+                self._url,
+                {
+                    "transcript": [
+                        {"ts": s["ts"], "speaker": s["speaker"], "text": s["text"]}
+                        for s in segs
+                    ],
+                    "threshold": self._threshold,
+                    "top_k": self._top_k,
+                },
+                LAYA_TIMEOUT_SEC,
+            )
+        except Exception as e:  # noqa: BLE001 — fail-soft is the CONTRACT here (P18)
+            logger.error("laya prepass peek fault (session=%s): %s", session_uid, e)
+            return None
+        if not result.get("candidates"):
+            return None
+        return {"block": annotation_block(result), "result": result}
+
     def annotate_on_end(self, session_uid: str) -> dict[str, Any] | None:
         """Scan the session's transcript for decision candidates. Returns
         ``{"block": markdown, "result": laya.v1 response}`` or None (no memory,
@@ -108,6 +134,50 @@ class LayaPrepass:
         )
         return {"block": annotation_block(result), "result": result}
 
+
+    def annotate_stream(self, redis_url: str, stream_key: str) -> dict[str, Any] | None:
+        """Scan a transcript stream that may predate this process (the
+        /api/meeting/start path: the watcher only remembers NEW segments).
+        Reads tc:meeting:{key} payloads (field "payload", transcript.v1 JSON),
+        caps at MAX_SEGMENTS (oldest dropped), and does NOT mutate memory —
+        the watcher's own remembrance continues independently."""
+        try:
+            import redis as redislib
+
+            r = redislib.from_url(redis_url, decode_responses=True)
+            entries = r.xrange(stream_key)
+        except Exception as e:  # noqa: BLE001 — fail-soft (P18)
+            logger.error("laya prepass stream read fault (%s): %s", stream_key, e)
+            return None
+        segs: list[dict[str, str]] = []
+        for _msg_id, fields in entries:
+            try:
+                payload = json.loads(fields.get("payload") or "{}")
+            except (ValueError, TypeError):
+                continue
+            if payload.get("type") != "transcription":
+                continue
+            for seg in payload.get("segments") or []:
+                text = str(seg.get("text") or "").strip()
+                if text:
+                    segs.append({"ts": _fmt_ts(seg.get("start")),
+                                 "speaker": str(seg.get("speaker") or ""),
+                                 "text": text})
+        if not segs:
+            return None
+        segs = segs[-MAX_SEGMENTS:]
+        try:
+            result = self._scan_fn(
+                self._url,
+                {"transcript": segs, "threshold": self._threshold, "top_k": self._top_k},
+                LAYA_TIMEOUT_SEC,
+            )
+        except Exception as e:  # noqa: BLE001 — fail-soft (P18)
+            logger.error("laya prepass stream scan fault (%s): %s", stream_key, e)
+            return None
+        if not result.get("candidates"):
+            return None
+        return {"block": annotation_block(result), "result": result}
 
 def _fmt_ts(start: Any) -> str:
     """Segment start -> a displayable ts. Numbers (seconds) -> HH:MM:SS; pass

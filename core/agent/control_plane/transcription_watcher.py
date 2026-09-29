@@ -31,6 +31,7 @@ import time
 import urllib.error
 import urllib.request
 
+from control_plane.laya_prepass import LayaPrepass
 from shared import units
 
 logger = logging.getLogger("agent_api.tx_watch")
@@ -213,7 +214,8 @@ def _resume_cursor(r, key: str) -> str:
     return str(cursor) if cursor else "0-0"
 
 
-def start(redis_url: str, dispatcher, live, *, subject: str = "u_live") -> threading.Thread:
+def start(redis_url: str, dispatcher, live, *, subject: str = "u_live",
+          prepass: LayaPrepass | None = None) -> threading.Thread:
     """Spawn the watcher (the ARM daemon thread) and return it (tests/introspection). ``keymap``
     (numeric meeting_id → row-id routing key) is the arm thread's own state.
 
@@ -223,13 +225,15 @@ def start(redis_url: str, dispatcher, live, *, subject: str = "u_live") -> threa
     keymap: dict[str, str] = {}
     t = threading.Thread(
         target=_run_arm, args=(redis_url, dispatcher, live, subject, keymap),
+        kwargs={"prepass": prepass},
         daemon=True, name="tx-watch",
     )
     t.start()
     return t
 
 
-def _run_arm(redis_url: str, dispatcher, live, subject: str, keymap: dict) -> None:
+def _run_arm(redis_url: str, dispatcher, live, subject: str, keymap: dict,
+             prepass: LayaPrepass | None = None) -> None:
     """Inbound watch → key on the row id, register live, re-arm copilot, reap on session_end. Does NOT
     write the transcript carrier — meeting-api's collector owns ``tc:meeting:{row_id}`` (P23/P0)."""
     import redis as redislib
@@ -243,6 +247,7 @@ def _run_arm(redis_url: str, dispatcher, live, subject: str, keymap: dict) -> No
             raise
     last_arm: dict[str, float] = {}     # native key → last spawn-or-touch (monotonic)
     first_seen: dict[str, float] = {}   # numeric meeting_id → first segment time (resolve-grace window)
+    prepass_annotated: set[str] = set()  # row ids whose brief already carries the laya block (once per meeting)
     logger.info("transcription watcher up — consuming %s (group=%s)", SRC, GROUP)
 
     while True:
@@ -267,7 +272,8 @@ def _run_arm(redis_url: str, dispatcher, live, subject: str, keymap: dict) -> No
 RESOLVE_GRACE_SEC = 6.0  # how long to wait for a native id before falling back to the numeric key
 
 
-def _handle(r, dispatcher, live, subject, p, last_arm, keymap, first_seen) -> None:
+def _handle(r, dispatcher, live, subject, p, last_arm, keymap, first_seen,
+            prepass: LayaPrepass | None = None, prepass_annotated: set[str] | None = None) -> None:
     # P0 (cross-tenant leak fix): the TRANSCRIPT CARRIER + :on + :cursor + dispatch keys are the numeric
     # ROW id `mid` — NOT the native Meet code. The native id is NOT unique (it collides across DIFFERENT
     # users and across ONE user's re-sends of the same link), so keying transcript data by it leaked one
@@ -309,6 +315,10 @@ def _handle(r, dispatcher, live, subject, p, last_arm, keymap, first_seen) -> No
             ing = _relay_health["ingest"]
             ing["last_segment_at"] = time.time()
             ing["segments"] = int(ing.get("segments", 0)) + 1
+        if prepass is not None:
+            # SEAM B (ADR-0036): remember what already crossed the wire; the arm
+            # PEEKS (no consume) so the fold-time scan keeps the full history.
+            prepass.remember(key, p.get("segments") or [])
     out_stream = f"tc:meeting:{key}"
     if kind == "session_end":
         # The collector emits the session_end MARKER onto tc:meeting:{row_id} (P23/P0, single writer); the
@@ -362,11 +372,13 @@ def _handle(r, dispatcher, live, subject, p, last_arm, keymap, first_seen) -> No
         except Exception:  # noqa: BLE001 — refresh is hygiene; never block the arm
             pass
         _arm(dispatcher, subject, key, platform, transcript_start_id=_resume_cursor(r, key),
-             numeric_meeting_id=mid if mid.isdigit() else None, native_id=native)
+             numeric_meeting_id=mid if mid.isdigit() else None, native_id=native,
+             prepass=prepass, annotated=prepass_annotated)
 
 
 def _arm(dispatcher, subject: str, key: str, platform: str, *, transcript_start_id: str = "0-0",
-         numeric_meeting_id: str | None = None, native_id: str | None = None) -> None:
+         numeric_meeting_id: str | None = None, native_id: str | None = None,
+         prepass: LayaPrepass | None = None, annotated: set[str] | None = None) -> None:
     """Spawn-or-touch the meeting's copilot (keyed agent-meet-{key}, where key is the ROW id). Idempotent
     FOR REAL since ADR 0027: runtime.v1 create touches a running workload (returns its live status) and
     only spawns one that is absent/exited — before that, every re-arm force-replaced the live container
@@ -387,9 +399,15 @@ def _arm(dispatcher, subject: str, key: str, platform: str, *, transcript_start_
         # (proc:meeting:{numeric}) so a re-sent bot on the same native link never mixes/clobbers a
         # previous meeting's processed doc. An internal hint — stripped before the unit.v1 check.
         meeting_ref["numeric_meeting_id"] = str(numeric_meeting_id)
+    brief = _BRIEF
+    if prepass is not None and annotated is not None and key not in annotated:
+        annotated.add(key)  # once per meeting: arm is idempotent, the scan is not free
+        annotation = prepass.annotate_peek(key)
+        if annotation:
+            brief = _BRIEF + "\n\n" + annotation["block"]
     inv = units.make_dispatch(
         subject=subject, trigger="transcription",
-        start=units.entrypoint(inline=_BRIEF),
+        start=units.entrypoint(inline=brief),
         context={"kind": "meeting", "meeting": meeting_ref},
     )
     try:
