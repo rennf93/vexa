@@ -1,0 +1,21 @@
+{
+  "contract": "config.v1",
+  "service": "laya",
+  "keys": [
+    { "key": "PORT", "class": "defaulted", "default": "8400", "description": "Listen port; the compose network reaches it as http://laya:8400.", "targets": ["compose"] },
+    { "key": "HOST", "class": "defaulted", "default": "0.0.0.0", "description": "Bind address. Container-internal only.", "targets": [] },
+    { "key": "LOG_LEVEL", "class": "defaulted", "default": "info", "description": "Log verbosity.", "targets": ["compose"] },
+    { "key": "VEXA_ENV", "class": "defaulted", "default": "development", "description": "`production` closes /docs on the public app.", "targets": ["compose"] },
+    { "key": "LAYA_CHECKPOINT", "class": "capability", "capability": "checkpoint", "description": "A local checkpoint dir (volume-mounted, e.g. /checkpoint) or an HF repo id. Unset = the service refuses to start: a decision service with no head is a broken deployment, not a degraded one (P14).", "targets": ["compose"] },
+    { "key": "LAYA_DEVICE", "class": "defaulted", "default": "(empty = auto)", "description": "Force cpu/mps/cuda; auto-detect when empty.", "targets": ["compose"] },
+    { "key": "LAYA_SCAN_THRESHOLD", "class": "defaulted", "default": "0.3", "description": "Min P(decision) for a window to become a candidate.", "targets": ["compose"] },
+    { "key": "LAYA_SCAN_TOP_K", "class": "defaulted", "default": "12", "description": "Max candidates returned per scan, best-first.", "targets": ["compose"] }
+  ],
+  "capabilities": {
+    "checkpoint": {
+      "description": "The trained laya head this deployment serves (kg-v03 or successor).",
+      "mode": "all",
+      "when_unconfigured": "The service fails fast at boot — intentionally, so a headless laya container is loud in `docker ps`, not silently useless behind a green /health on another service."
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "transcript": [
+    { "ts": "00:00:01", "speaker": "", "text": "hello hello" },
+    { "ts": "00:00:07", "speaker": "Dmitri", "text": "were you able to check that PR?" }
+  ],
+  "language": "en",
+  "threshold": 0.4,
+  "top_k": 10
+}

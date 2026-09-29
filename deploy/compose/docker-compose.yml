@@ -273,6 +273,9 @@ services:
       # 'Add bot from URL' (terminal): agent-api forwards POST /api/meeting/bot → the gateway POST /bots.
       - VEXA_GATEWAY_URL=http://gateway:8000
       - VEXA_BOT_API_KEY=${VEXA_BOT_API_KEY:-}
+      # SEAM B (System-1): the laya decision service. Empty = the pre-pass is ABSENT
+      # (a smaller product, never a broken one): transcripts dispatch exactly as before.
+      - VEXA_LAYA_URL=${VEXA_LAYA_URL:-}
     volumes:
       # The Workspace store backing (dev): the worker mounts the subject's subdir; agent-api reads the tree.
       - agent-workspaces:/workspaces
@@ -293,6 +296,43 @@ services:
         condition: service_healthy
     networks: [vexa]
     restart: unless-stopped
+
+  laya:
+    # The System-1 decision service (ADR-0036): one laya checkpoint (e.g. kg-v03), two surfaces —
+    # POST /v1/scan/decision (laya.v1, the dispatch pre-pass) and the laya_decide MCP tool at /mcp
+    # (granted to agent workers via core/agent/tools-seed/laya_decide.json). OPTIONAL: an agent-only
+    # deployment without laya is a smaller product, never a degraded one — agent-api fails soft when
+    # VEXA_LAYA_URL is empty. The checkpoint arrives by read-only VOLUME (weights never bake into
+    # images); point LAYA_CHECKPOINT_HOST at a dir containing model.safetensors + rl_agent_config.json
+    # + tokenizer/ (a future HF pull replaces the mount once a repo is approved for publishing).
+    build:
+      context: ../..
+      dockerfile: core/agent/services/laya/Dockerfile
+    image: vexaai/v012-laya:${IMAGE_TAG:-dev}
+    environment:
+      - PORT=8400
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - VEXA_ENV=${VEXA_ENV:-development}
+      - LAYA_CHECKPOINT=/checkpoint
+      - LAYA_DEVICE=${LAYA_DEVICE:-}
+      - LAYA_SCAN_THRESHOLD=${LAYA_SCAN_THRESHOLD:-0.3}
+      - LAYA_SCAN_TOP_K=${LAYA_SCAN_TOP_K:-12}
+    volumes:
+      - ${LAYA_CHECKPOINT_HOST:-/dev/null}:/checkpoint:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8400/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # A 1.2GB torch checkpoint loads on first request — give the first boot room (P18: start-period,
+      # then the healthcheck tells the truth about load state).
+      start_period: 180s
+    init: true
+    networks: [vexa]
+    restart: unless-stopped
+    # OPTIONAL by profile (the mailbox pattern): the stack runs unchanged without
+    # it; enable with COMPOSE_PROFILES=...,laya once a checkpoint is mounted.
+    profiles: ["laya"]
 
   meeting-api:
     build:

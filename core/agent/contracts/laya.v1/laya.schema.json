@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vexa.ai/schemas/laya.v1",
+  "title": "laya.v1",
+  "description": "The System-1 decision-scan wire: agent-api (or any lane service) POSTs a speaker-attributed transcript to the laya service's /v1/scan/decision and gets back decision-candidate windows with scores. The judge is opaque — the contract is the scan wire only. Provenance (checkpoint id, elapsed) rides the response so callers can attribute a scan (P21: report state from evidence).",
+  "$defs": {
+    "Utterance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ts", "text"],
+      "properties": {
+        "ts": { "type": "string", "description": "utterance start timestamp as it should be echoed in candidates, e.g. 00:14:19" },
+        "speaker": { "type": "string", "description": "speaker name; empty when the source has no diarization" },
+        "text": { "type": "string", "minLength": 1, "description": "utterance text" }
+      }
+    },
+    "ScanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transcript"],
+      "properties": {
+        "transcript": { "type": "array", "items": { "$ref": "#/$defs/Utterance" }, "minItems": 1 },
+        "language": { "type": ["string", "null"], "description": "caller-supplied language (transcript.v1 per-segment language, majority) — echoed, never re-detected" },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1, "description": "min P(decision) for a window to be a candidate; service default when absent" },
+        "top_k": { "type": "integer", "minimum": 1, "description": "max candidates returned, best-first; service default when absent" }
+      }
+    },
+    "Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_ts", "end_ts", "score", "text"],
+      "properties": {
+        "start_ts": { "type": "string" },
+        "end_ts": { "type": "string" },
+        "score": { "type": "number", "minimum": 0, "maximum": 1, "description": "P(decision) for the window" },
+        "text": { "type": "string", "description": "the window text the score refers to" }
+      }
+    },
+    "ScanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window_count", "candidates", "checkpoint", "elapsed_ms"],
+      "properties": {
+        "window_count": { "type": "integer", "minimum": 0 },
+        "candidates": { "type": "array", "items": { "$ref": "#/$defs/Candidate" } },
+        "language": { "type": ["string", "null"] },
+        "checkpoint": { "type": "string", "description": "provenance: which head scored this scan" },
+        "elapsed_ms": { "type": "number", "description": "wall time of the judge calls" }
+      }
+    }
+  }
+}

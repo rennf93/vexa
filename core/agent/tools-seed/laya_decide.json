@@ -1,0 +1,13 @@
+{
+  "tool": {
+    "name": "laya_decide",
+    "scope": "laya:decide",
+    "grant": "auto",
+    "transport": "mcp",
+    "mcp_server": "laya"
+  },
+  "mcp": {
+    "url": "http://laya:8400/mcp",
+    "type": "http"
+  }
+}

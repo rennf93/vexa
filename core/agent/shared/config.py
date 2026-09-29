@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     # WS /ws authorize_subscribe ownership gate. meeting-api trusts the gateway-injected X-User-Id the
     # same way its own /transcripts/by-id path does.
     meeting_api_url: str = "http://meeting-api:8080"
+    # laya.v1 seam — the System-1 decision service (ADR-0036). Empty = NO pre-pass and NO
+    # laya calls anywhere: transcripts dispatch exactly as before (fail-soft by construction —
+    # the capability is ABSENT, not degraded). Set to http://laya:8400 in compose when the laya
+    # service is up.
+    laya_url: str = ""
     # The X-Internal-Secret the admin-api's internal tier checks (same value the gateway uses). SecretStr.
 
     # ── secrets (never logged, committed, or in goldens) — P14 / P15 ─────────
