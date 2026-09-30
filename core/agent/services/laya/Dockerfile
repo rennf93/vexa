@@ -11,4 +11,6 @@ RUN pip install --no-cache-dir ".[runtime,mcp]"
 EXPOSE 8400
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s \
     CMD python -c "import urllib.request;import sys;r=urllib.request.urlopen('http://127.0.0.1:8400/health',timeout=3);sys.exit(0 if r.status==200 else 1)"
-CMD ["uvicorn", "laya_svc.main:app", "--host", "0.0.0.0", "--port", "8400"]
+# python -m laya_svc composes the app itself: a missing LAYA_CHECKPOINT fails
+# loud AT BOOT with the remedy in the message (P14), instead of a half-bound app.
+CMD ["python", "-m", "laya_svc"]
