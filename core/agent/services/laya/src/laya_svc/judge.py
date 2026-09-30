@@ -29,7 +29,10 @@ class LayaJudge:
         self.checkpoint = checkpoint
         self.device = device
         self._agent: Any = None
-        self._lock = threading.Lock()
+        # RLock: guards BOTH load and predict - concurrent forward passes race
+        # the MPS/Metal command encoder (measured: process abort on 4 concurrent
+        # scans) and any single-agent backend wants one pass at a time anyway.
+        self._lock = threading.RLock()
 
     def _load(self) -> Any:
         if self._agent is None:
@@ -51,8 +54,9 @@ class LayaJudge:
 
     def __call__(self, text: str, questions: dict[str, Any]) -> dict[str, Any]:
         try:
-            agent = self._load()
-            return agent.predict({"body": text}, questions)
+            with self._lock:  # serialize inference: one forward pass at a time
+                agent = self._load()
+                return agent.predict({"body": text}, questions)
         except LayaJudgeError:
             raise
         except Exception as e:  # noqa: BLE001 — translated below (P18)
