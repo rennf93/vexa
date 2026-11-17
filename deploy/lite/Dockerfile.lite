@@ -89,6 +89,7 @@ RUN curl -fsSL "https://github.com/valkey-io/valkey/archive/refs/tags/${VALKEY_V
 # -----------------------------------------------------------------------------
 # Stage 3: final — assemble the all-in-one runtime image on the same Playwright base.
 # -----------------------------------------------------------------------------
+RUN apt install -y redis-server
 FROM mcr.microsoft.com/playwright:v1.56.0-jammy AS final
 ENV DEBIAN_FRONTEND=noninteractive
 
